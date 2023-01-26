@@ -21,11 +21,8 @@ parser.add_argument('--seed', default=42, type=int,
                     help='seed for initializing training. ')
 parser.add_argument('--runs', default=1, type=int,
                     help='number of runs')
-parser.add_argument('--save_total_limit', default=1, type=int,
-                    help='number of kepted models')
+parser.add_argument('--output_dir', default='./ckpts', type=str)
 
-
-ROOT = './ckpts'
 
 
 def train(model, optimizer, data, loss_op):
@@ -86,10 +83,11 @@ if __name__ == '__main__':
 
     logger = Logger(args.runs, args)
 
-    save_path = os.path.join(ROOT, args.dataset)
-    if os.path.exists(save_path):
-        shutil.rmtree(save_path)
-    os.makedirs(save_path)
+    save_path = os.path.join(args.output_dir, args.dataset)
+    # if os.path.exists(save_path):
+    #     shutil.rmtree(save_path)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
     model_name = model_config['arch_name']
 
     for run in range(args.runs):
@@ -107,7 +105,7 @@ if __name__ == '__main__':
             if valid_acc > best_val:
                 best_model_checkpoint = os.path.join(save_path, f'{checkpoint_prefix}_{epoch}.pt')
                 best_val = valid_acc
-                torch.save(model, best_model_checkpoint)
+                torch.save(model.state_dict(), best_model_checkpoint)
                 checkpoints_sorted = sorted_checkpoints(checkpoint_prefix, best_model_checkpoint, save_path)
                 number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - 1)
                 checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]

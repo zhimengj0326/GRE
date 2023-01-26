@@ -1,31 +1,49 @@
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+from torch.nn import ModuleList, BatchNorm1d
+from torch_sparse import SparseTensor
+
 from tqdm import tqdm
 
-import torch
-from torch import Tensor
-import torch.nn.functional as F
-from torch.nn import ModuleList, Linear, BatchNorm1d
-from torch_sparse import SparseTensor
-from torch_geometric.nn import SAGEConv
-from .base import BaseModel
 
-
-class SAGE(BaseModel):
+class BaseModel(torch.nn.Module):
     def __init__(self, in_channels: int, hidden_channels: int,
                  out_channels: int, num_layers: int, dropout: float = 0.0,
                  batch_norm: bool = False, residual: bool = False, use_linear=False):
-        super(SAGE, self).__init__(in_channels, hidden_channels, out_channels, 
-                                  num_layers, dropout, batch_norm, residual, use_linear)
-        for i in range(num_layers):
-            in_dim = out_dim = hidden_channels
-            if i == 0:
-                in_dim = in_channels
-            if i == num_layers - 1:
-                out_dim = out_channels
-            conv = SAGEConv(in_dim, out_dim)
-            self.convs.append(conv)
-            if self.use_linear:
-                self.lins.append(torch.nn.Linear(in_dim, out_dim, bias=False))
-                
+        super(BaseModel, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.dropout = torch.nn.Dropout(p=dropout)
+        self.activation = torch.nn.ReLU()
+        self.batch_norm = batch_norm
+        self.residual = residual
+        self.num_layers = num_layers
+        self.use_linear = use_linear
+        if self.use_linear:
+            self.lins = torch.nn.ModuleList()
+        self.convs = ModuleList()
+        if self.batch_norm:
+            self.bns = ModuleList()
+            for i in range(num_layers - 1):
+                bn = BatchNorm1d(hidden_channels)
+                self.bns.append(bn)
+
+    def reset_parameters(self):
+        for conv in self.convs:
+            conv.reset_parameters()
+        if self.batch_norm:
+            for bn in self.bns:
+                bn.reset_parameters()
+
+
+    @classmethod
+    def from_pretrained(cls, in_channels: int, out_channels: int, saved_ckpt_path: str, **kwargs):
+        model = cls(in_channels=in_channels, out_channels=out_channels, **kwargs)
+        print(f'load model weights from {saved_ckpt_path}')
+        model.load_state_dict(torch.load(saved_ckpt_path, map_location='cpu'))
+        return model
+
 
     def forward(self, x: Tensor, adj_t: SparseTensor, *args, **kwargs) -> Tensor:
         for idx, conv in enumerate(self.convs[:-1]):
