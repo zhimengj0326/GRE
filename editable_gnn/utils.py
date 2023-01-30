@@ -1,7 +1,15 @@
 import contextlib
 import torch
+import random
 import numpy as np
 from torch import nn
+
+
+def set_seeds_all(seed=1):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 @contextlib.contextmanager

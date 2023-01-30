@@ -1,5 +1,5 @@
 from typing import Tuple, Union, Optional
-
+import time
 import torch
 from torch import Tensor
 import torch_geometric.transforms as T
@@ -8,6 +8,8 @@ from torch_geometric.datasets import (Planetoid, WikiCS, Coauthor, Amazon,
                                       GNNBenchmarkDataset, Yelp, Flickr,
                                       Reddit2, PPI)
 from ogb.nodeproppred import PygNodePropPredDataset
+from torch_geometric.utils import subgraph
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 
 def gen_masks(y: Tensor, train_per_class: int = 20, val_per_class: int = 30,
@@ -160,3 +162,39 @@ def get_data(root: str, name: str) -> Tuple[Data, int, int]:
         return get_products(root)
     else:
         raise NotImplementedError
+
+
+def to_inductive(data):
+    data = data.clone()
+    mask = data.train_mask
+    data.x = data.x[mask]
+    data.y = data.y[mask]
+    data.train_mask = data.train_mask[mask]
+    data.test_mask = None
+    data.edge_index, _ = subgraph(mask, data.edge_index, None,
+                                  relabel_nodes=True, num_nodes=data.num_nodes)
+    data.num_nodes = mask.sum().item()
+    return data
+
+
+def preprocess_data(model_config, data):
+    loop, normalize = model_config['loop'], model_config['normalize']
+    if loop:
+        t = time.perf_counter()
+        print('Adding self-loops...', end=' ', flush=True)
+        data.adj_t = data.adj_t.set_diag()
+        print(f'Done! [{time.perf_counter() - t:.2f}s]')
+    
+    if normalize:
+        t = time.perf_counter()
+        data.adj_t = gcn_norm(data.adj_t)
+        print(f'Done! [{time.perf_counter() - t:.2f}s]')
+
+
+def prepare_dataset(model_config, data):
+    train_data = to_inductive(data)
+    train_data = T.ToSparseTensor()(train_data.to('cuda'))
+    data = T.ToSparseTensor()(data.to('cuda'))
+    preprocess_data(model_config, train_data)
+    preprocess_data(model_config, data)
+    return train_data, data

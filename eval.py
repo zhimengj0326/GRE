@@ -4,13 +4,11 @@ import shutil
 import numpy as np
 import random
 import pdb
-import os
 import torch.nn.functional as F
 import yaml
 import editable_gnn.models as models
-from data import get_data
-from utils import prepare_dataset, compute_micro_f1, get_optimizer, set_seeds_all, sorted_checkpoints
-from logger import Logger
+from data import get_data, prepare_dataset
+from editable_gnn import WholeGraphTrainer, set_seeds_all
 
 
 parser = argparse.ArgumentParser()
@@ -23,22 +21,8 @@ parser.add_argument('--seed', default=42, type=int,
                     help='seed for initializing training. ')
 parser.add_argument('--saved_model_path', type=str, required=True,
                     help='the path to the traiend model')
+parser.add_argument('--output_dir', default='./finetune', type=str)
 
-
-@torch.no_grad()
-def test(model, data):
-    out = get_prediction(model, data)
-    y_true = data.y
-    train_acc = compute_micro_f1(out, y_true, data.train_mask)
-    valid_acc = compute_micro_f1(out, y_true, data.val_mask)
-    test_acc = compute_micro_f1(out, y_true, data.test_mask)
-    return train_acc, valid_acc, test_acc
-
-
-@torch.no_grad()
-def get_prediction(model, data):
-    model.eval()
-    return model(data.x, data.adj_t)
 
 
 def edit(model, data, optimizer, loss_op, node_idx_2flip, flipped_label, max_num_step):
@@ -88,34 +72,18 @@ if __name__ == '__main__':
     print(model)
     model.cuda()
     train_data, whole_data = prepare_dataset(model_config, data)
-    del data
     print(f'training data: {train_data}')
     print(f'whole data: {whole_data}')
     N = 1000
-    result = test(model, whole_data)
-    train_acc, valid_acc, test_acc = result
+    trainer = WholeGraphTrainer(model, train_data, whole_data, model_config, 
+                                args.output_dir, args.dataset, multi_label, 
+                                False, 1, args.seed)
+
+    bef_edit_results = trainer.test(model, whole_data)
+    train_acc, valid_acc, test_acc = bef_edit_results
     print(f'before edit, train acc {train_acc}, valid acc {valid_acc}, test acc {test_acc}')
-    bef_edit_logits = get_prediction(model, whole_data)
-    bef_edit_pred = bef_edit_logits.argmax(dim=-1)
-
-    val_nodes = whole_data.val_mask.nonzero().squeeze()
-    # pdb.set_trace()
-    node_idx_2flip = bef_edit_pred.ne(whole_data.y).nonzero()[123].item()
-    # node_idx_2flip = val_nodes[random.randint(0, len(val_nodes))].item()
-    bef_edit_y_pred = bef_edit_pred[node_idx_2flip].item()
-    y_true = whole_data.y[node_idx_2flip].item()
-
-    loss_op = F.binary_cross_entropy_with_logits if multi_label else F.cross_entropy
-    optimizer = get_optimizer(model_config, model)
-    # flipped_label = torch.randint(high=num_classes, size=(1,), device='cuda')
-    flipped_label = whole_data.y[node_idx_2flip].unsqueeze(dim=0)
-    edit(model, whole_data, optimizer, loss_op, node_idx_2flip, flipped_label, 10)
-
-    result = test(model, whole_data)
-    train_acc, valid_acc, test_acc = result
-    print(f'after edit, train acc {train_acc}, valid acc {valid_acc}, test acc {test_acc}')
-    after_edit_logits = get_prediction(model, whole_data)
-    after_edit_pred = after_edit_logits.argmax(dim=-1)
-    after_edit_y_pred = after_edit_pred[node_idx_2flip].item()
-    print(f'edit node_idx: {node_idx_2flip}, true label: {y_true}, before edit model predict: {bef_edit_y_pred},'
-          f'corrected label: {flipped_label.item()}, after edit model predict: {after_edit_y_pred}')
+    node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, 50, 'wrong2correct', True)
+    # node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, 400, 'random', True)
+    node_idx_2flip, flipped_label = node_idx_2flip.cuda(), flipped_label.cuda()
+    results = trainer.eval_edit_quality(node_idx_2flip, flipped_label, whole_data, 10, bef_edit_results)
+    print(results)
