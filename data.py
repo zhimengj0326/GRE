@@ -3,6 +3,7 @@ import time
 import torch
 from torch import Tensor
 import torch_geometric.transforms as T
+from torch_geometric.utils import to_undirected
 from torch_geometric.data import Data, Batch
 from torch_geometric.datasets import (Planetoid, WikiCS, Coauthor, Amazon,
                                       GNNBenchmarkDataset, Yelp, Flickr,
@@ -76,10 +77,9 @@ def get_amazon(root: str, name: str) -> Tuple[Data, int, int]:
 
 
 def get_arxiv(root: str) -> Tuple[Data, int, int]:
-    dataset = PygNodePropPredDataset('ogbn-arxiv', f'{root}/OGB',
-                                     pre_transform=T.ToSparseTensor())
+    dataset = PygNodePropPredDataset('ogbn-arxiv', f'{root}/OGB')
     data = dataset[0]
-    data.adj_t = data.adj_t.to_symmetric()
+    data.edge_index = to_undirected(data.edge_index)
     data.node_year = None
     data.y = data.y.view(-1)
     split_idx = dataset.get_idx_split()

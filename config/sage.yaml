@@ -3,6 +3,18 @@ norm: false
 loop: false
 
 params:
+  arxiv:
+    arch_name: SAGE
+    architecture:
+      num_layers: 3
+      hidden_channels: 128
+      dropout: 0.5
+      batch_norm: true
+      residual: false
+    optim: adam
+    lr: 0.01
+    epochs: 500
+  
   reddit:
     arch_name: SAGE
     architecture:

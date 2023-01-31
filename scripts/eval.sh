@@ -1,6 +1,6 @@
 # model=sage
 model=gcn
-dataset=cora
+dataset=arxiv
 output_dir=./finetune
 
 if ! [ -d "./${output_dir}/${dataset}" ]; then

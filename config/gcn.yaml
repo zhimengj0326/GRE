@@ -3,6 +3,19 @@ norm: true
 loop: true
 
 params:
+
+  arxiv:
+    arch_name: GCN
+    architecture:
+      num_layers: 3
+      hidden_channels: 128
+      dropout: 0.5
+      batch_norm: true
+      residual: false
+    optim: adam
+    lr: 0.01
+    epochs: 500
+  
   reddit:
     arch_name: GCN
     architecture:
@@ -15,6 +28,7 @@ params:
     lr: 0.01
     epochs: 400
 
+  
   flickr:
     arch_name: GCN
     architecture:
