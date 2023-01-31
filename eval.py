@@ -22,7 +22,9 @@ parser.add_argument('--seed', default=42, type=int,
 parser.add_argument('--saved_model_path', type=str, required=True,
                     help='the path to the traiend model')
 parser.add_argument('--output_dir', default='./finetune', type=str)
+parser.add_argument('--num_samples', default=50, type=int)
 
+MAX_NUM_EDIT_STEPS = 10
 
 
 def edit(model, data, optimizer, loss_op, node_idx_2flip, flipped_label, max_num_step):
@@ -82,8 +84,15 @@ if __name__ == '__main__':
     bef_edit_results = trainer.test(model, whole_data)
     train_acc, valid_acc, test_acc = bef_edit_results
     print(f'before edit, train acc {train_acc}, valid acc {valid_acc}, test acc {test_acc}')
-    node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, 50, 'wrong2correct', True)
-    # node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, 400, 'random', True)
+    node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, args.num_samples, 'wrong2correct', True)
+    # node_idx_2flip, flipped_label = trainer.select_node(whole_data, num_classes, args.num_samples, 'random', True)
     node_idx_2flip, flipped_label = node_idx_2flip.cuda(), flipped_label.cuda()
-    results = trainer.eval_edit_quality(node_idx_2flip, flipped_label, whole_data, 10, bef_edit_results)
+    print(f'the calculated stats averaged over {args.num_samples} sequential edit')
+    results = trainer.eval_edit_quality(node_idx_2flip, flipped_label, whole_data, 
+                                        MAX_NUM_EDIT_STEPS, bef_edit_results, sequential=True)
+    print(results)
+
+    print(f'the calculated stats after {args.num_samples} independent edit')
+    results = trainer.eval_edit_quality(node_idx_2flip, flipped_label, whole_data, 
+                                        MAX_NUM_EDIT_STEPS, bef_edit_results, sequential=False)
     print(results)

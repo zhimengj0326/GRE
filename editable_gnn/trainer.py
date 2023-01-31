@@ -2,6 +2,7 @@ import os
 import pdb
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from pathlib import Path
+from copy import deepcopy
 
 import torch
 import numpy as np
@@ -181,14 +182,20 @@ class WholeGraphTrainer(object):
         return optimizer
 
 
-    def eval_edit_quality(self, node_idx_2flip, flipped_label, whole_data, max_num_step, bef_edit_results): 
+    def eval_edit_quality(self, node_idx_2flip, flipped_label, whole_data, max_num_step, bef_edit_results, sequential=False): 
         bef_edit_tra_acc, bef_edit_val_acc, bef_edit_tst_acc = bef_edit_results
-        results_temporary = self.edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
-        train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
-        # pdb.set_trace()
-        tra_drawdown = np.mean(train_acc) - bef_edit_tra_acc
-        val_drawdown = np.mean(val_acc) - bef_edit_val_acc
-        test_drawdown = np.mean(test_acc) - bef_edit_tst_acc
+        if sequential:
+            results_temporary = self.sequential_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
+            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
+            tra_drawdown = train_acc[-1] - bef_edit_tra_acc
+            val_drawdown = val_acc[-1] - bef_edit_val_acc
+            test_drawdown = test_acc[-1] - bef_edit_tst_acc
+        else:
+            results_temporary = self.independent_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
+            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
+            tra_drawdown = np.mean(train_acc) - bef_edit_tra_acc
+            val_drawdown = np.mean(val_acc) - bef_edit_val_acc
+            test_drawdown = np.mean(test_acc) - bef_edit_tst_acc
         return dict(bef_edit_tra_acc=bef_edit_tra_acc, 
                     bef_edit_val_acc=bef_edit_val_acc, 
                     bef_edit_tst_acc=bef_edit_tst_acc, 
@@ -199,11 +206,11 @@ class WholeGraphTrainer(object):
                     mean_complexity=np.mean(steps)
                     )
 
-    def single_edit(self, idx, label, optimizer, max_num_step):
+    def single_edit(self, model, idx, label, optimizer, max_num_step):
         success = False
         for step in range(1, max_num_step + 1):
             optimizer.zero_grad()
-            out = self.model(self.whole_data.x, self.whole_data.adj_t)
+            out = model(self.whole_data.x, self.whole_data.adj_t)
             loss = self.loss_op(out[idx], label)
             loss.backward()
             optimizer.step()
@@ -212,16 +219,28 @@ class WholeGraphTrainer(object):
                 # print(f'successfully flip the model with {i} grad decent steps, break')
                 success = True
                 break
-        return success, loss, step
+        return model, success, loss, step
         
 
-    def edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+    def sequential_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
         self.model.train()
-        optimizer = self.get_optimizer(self.model_config, self.model)
+        model = deepcopy(self.model)
+        optimizer = self.get_optimizer(self.model_config, model)
         results_temporary = []
         for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
-            success, loss, steps = self.single_edit(idx, f_label, optimizer, max_num_step)
-            results_temporary.append((*self.test(self.model, whole_data), success, steps))
+            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
+            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
+        return results_temporary
+
+
+    def independent_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+        self.model.train()
+        results_temporary = []
+        for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
+            model = deepcopy(self.model)
+            optimizer = self.get_optimizer(self.model_config, model)
+            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
+            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
         return results_temporary
 
 
