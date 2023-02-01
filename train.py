@@ -3,7 +3,7 @@ import pdb
 import yaml
 import editable_gnn.models as models
 from data import get_data, prepare_dataset
-from editable_gnn import WholeGraphTrainer, set_seeds_all
+from editable_gnn import WholeGraphTrainer, BaseTrainer, set_seeds_all
 
 
 parser = argparse.ArgumentParser()
@@ -41,17 +41,18 @@ if __name__ == '__main__':
         multi_label = True
     else:
         multi_label = False
-    GNN = getattr(models, model_config['arch_name'])
+    MODEL_FAMILY = getattr(models, model_config['arch_name'])
     data, num_features, num_classes = get_data(args.root, args.dataset)
-    model = GNN(in_channels=num_features, out_channels=num_classes, **model_config['architecture'])
+    model = MODEL_FAMILY(in_channels=num_features, out_channels=num_classes, **model_config['architecture'])
     model.cuda()
     print(model)
     train_data, whole_data = prepare_dataset(model_config, data)
     del data
     print(f'training data: {train_data}')
     print(f'whole data: {whole_data}')
-    trainer = WholeGraphTrainer(model, train_data, whole_data, model_config, 
-                                args.output_dir, args.dataset, multi_label, 
-                                False, args.runs, args.seed)
+    TRAINER_CLS = BaseTrainer if  model_config['arch_name'] == 'MLP' else WholeGraphTrainer
+    trainer = TRAINER_CLS(model, train_data, whole_data, model_config, 
+                          args.output_dir, args.dataset, multi_label, 
+                          False, args.runs, args.seed)
 
     trainer.train()

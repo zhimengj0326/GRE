@@ -10,7 +10,7 @@ params:
       hidden_channels: 256
       dropout: 0.5
       drop_input: true
-      batch_norm: true
+      batch_norm: false
       residual: false
       shared_weights: false
       alpha: 0.1
@@ -26,7 +26,7 @@ params:
       hidden_channels: 256
       dropout: 0.5
       drop_input: true
-      batch_norm: true
+      batch_norm: false
       residual: false
       shared_weights: false
       alpha: 0.1
@@ -42,7 +42,7 @@ params:
       hidden_channels: 512
       dropout: 0.0
       drop_input: false
-      batch_norm: true
+      batch_norm: false
       residual: false
       shared_weights: false
       alpha: 0.2

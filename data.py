@@ -90,8 +90,7 @@ def get_arxiv(root: str) -> Tuple[Data, int, int]:
 
 
 def get_products(root: str) -> Tuple[Data, int, int]:
-    dataset = PygNodePropPredDataset('ogbn-products', f'{root}/OGB',
-                                     pre_transform=T.ToSparseTensor())
+    dataset = PygNodePropPredDataset('ogbn-products', f'{root}/OGB')
     data = dataset[0]
     data.y = data.y.view(-1)
     split_idx = dataset.get_idx_split()
@@ -102,19 +101,19 @@ def get_products(root: str) -> Tuple[Data, int, int]:
 
 
 def get_yelp(root: str) -> Tuple[Data, int, int]:
-    dataset = Yelp(f'{root}/YELP', pre_transform=T.ToSparseTensor())
+    dataset = Yelp(f'{root}/YELP')
     data = dataset[0]
     data.x = (data.x - data.x.mean(dim=0)) / data.x.std(dim=0)
     return data, dataset.num_features, dataset.num_classes
 
 
 def get_flickr(root: str) -> Tuple[Data, int, int]:
-    dataset = Flickr(f'{root}/Flickr', pre_transform=T.ToSparseTensor())
+    dataset = Flickr(f'{root}/Flickr')
     return dataset[0], dataset.num_features, dataset.num_classes
 
 
 def get_reddit(root: str) -> Tuple[Data, int, int]:
-    dataset = Reddit2(f'{root}/Reddit2', pre_transform=T.ToSparseTensor())
+    dataset = Reddit2(f'{root}/Reddit2')
     data = dataset[0]
     data.x = (data.x - data.x.mean(dim=0)) / data.x.std(dim=0)
     return data, dataset.num_features, dataset.num_classes

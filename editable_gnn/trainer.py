@@ -15,7 +15,7 @@ from editable_gnn.logger import Logger
 from editable_gnn.utils import set_seeds_all
 
 
-class WholeGraphTrainer(object):
+class BaseTrainer(object):
     def __init__(self, 
                  model: BaseModel, 
                  train_data: Data, 
@@ -44,18 +44,36 @@ class WholeGraphTrainer(object):
         self.seed = seed
 
 
-    @staticmethod
-    def train_loop(model: BaseModel, 
+    def train_loop(self,
+                   model: BaseModel, 
                    optimizer: torch.optim.Optimizer, 
                    train_data: Data, 
                    loss_op):
         model.train()
         optimizer.zero_grad()
-        out = model(train_data.x, train_data.adj_t)
+        input = self.grab_input(train_data)
+        out = model(**input)
         loss = loss_op(out[train_data.train_mask], train_data.y[train_data.train_mask])
         loss.backward()
         optimizer.step()
         return loss.item()
+
+
+    def train(self):
+        for run in range(self.runs):
+            set_seeds_all(self.seed + run)
+            self.single_run(run)
+        self.logger.print_statistics()
+
+
+    def save_model(self, checkpoint_prefix: str, epoch: int):
+        best_model_checkpoint = os.path.join(self.save_path, f'{checkpoint_prefix}_{epoch}.pt')
+        torch.save(self.model.state_dict(), best_model_checkpoint)
+        checkpoints_sorted = self.sorted_checkpoints(checkpoint_prefix, best_model_checkpoint, self.save_path)
+        number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - 1)
+        checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]
+        for checkpoint in checkpoints_to_be_deleted:
+            os.remove(f'./{checkpoint}')
 
 
     def single_run(self, run: int):
@@ -79,22 +97,6 @@ class WholeGraphTrainer(object):
                     f'Valid f1: {100 * valid_acc:.2f}% '
                     f'Test f1: {100 * test_acc:.2f}%')
         self.logger.print_statistics(run)
-
-    def save_model(self, checkpoint_prefix: str, epoch: int):
-        best_model_checkpoint = os.path.join(self.save_path, f'{checkpoint_prefix}_{epoch}.pt')
-        torch.save(self.model.state_dict(), best_model_checkpoint)
-        checkpoints_sorted = self.sorted_checkpoints(checkpoint_prefix, best_model_checkpoint, self.save_path)
-        number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - 1)
-        checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]
-        for checkpoint in checkpoints_to_be_deleted:
-            os.remove(f'./{checkpoint}')
-
-
-    def train(self):
-        for run in range(self.runs):
-            set_seeds_all(self.seed + run)
-            self.single_run(run)
-        self.logger.print_statistics()
 
 
     @staticmethod
@@ -122,7 +124,7 @@ class WholeGraphTrainer(object):
 
 
     @torch.no_grad()
-    def test(self, model, data):
+    def test(self, model: BaseModel, data: Data):
         out = self.prediction(model, data)
         y_true = data.y
         train_acc = self.compute_micro_f1(out, y_true, data.train_mask)
@@ -131,11 +133,11 @@ class WholeGraphTrainer(object):
         return train_acc, valid_acc, test_acc
 
 
-    @staticmethod
     @torch.no_grad()
-    def prediction(model, data):
+    def prediction(self, model: BaseModel, data: Data):
         model.eval()
-        return model(data.x, data.adj_t)
+        input = self.grab_input(data)
+        return model(**input)
 
 
     @staticmethod
@@ -182,68 +184,6 @@ class WholeGraphTrainer(object):
         return optimizer
 
 
-    def eval_edit_quality(self, node_idx_2flip, flipped_label, whole_data, max_num_step, bef_edit_results, sequential=False): 
-        bef_edit_tra_acc, bef_edit_val_acc, bef_edit_tst_acc = bef_edit_results
-        if sequential:
-            results_temporary = self.sequential_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
-            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
-            tra_drawdown = train_acc[-1] - bef_edit_tra_acc
-            val_drawdown = val_acc[-1] - bef_edit_val_acc
-            test_drawdown = test_acc[-1] - bef_edit_tst_acc
-        else:
-            results_temporary = self.independent_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
-            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
-            tra_drawdown = np.mean(train_acc) - bef_edit_tra_acc
-            val_drawdown = np.mean(val_acc) - bef_edit_val_acc
-            test_drawdown = np.mean(test_acc) - bef_edit_tst_acc
-        return dict(bef_edit_tra_acc=bef_edit_tra_acc, 
-                    bef_edit_val_acc=bef_edit_val_acc, 
-                    bef_edit_tst_acc=bef_edit_tst_acc, 
-                    tra_drawdown=-tra_drawdown * 100, 
-                    val_drawdown=-val_drawdown * 100, 
-                    test_drawdown=-test_drawdown * 100, 
-                    success_rate=np.mean(succeses),
-                    mean_complexity=np.mean(steps)
-                    )
-
-    def single_edit(self, model, idx, label, optimizer, max_num_step):
-        success = False
-        for step in range(1, max_num_step + 1):
-            optimizer.zero_grad()
-            out = model(self.whole_data.x, self.whole_data.adj_t)
-            loss = self.loss_op(out[idx], label)
-            loss.backward()
-            optimizer.step()
-            y_pred = out.argmax(dim=-1)[idx]
-            if y_pred == label:
-                # print(f'successfully flip the model with {i} grad decent steps, break')
-                success = True
-                break
-        return model, success, loss, step
-        
-
-    def sequential_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
-        self.model.train()
-        model = deepcopy(self.model)
-        optimizer = self.get_optimizer(self.model_config, model)
-        results_temporary = []
-        for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
-            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
-            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
-        return results_temporary
-
-
-    def independent_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
-        self.model.train()
-        results_temporary = []
-        for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
-            model = deepcopy(self.model)
-            optimizer = self.get_optimizer(self.model_config, model)
-            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
-            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
-        return results_temporary
-
-
     def select_node(self, whole_data: Data, 
                     num_classes: int, 
                     num_samples: int, 
@@ -270,3 +210,154 @@ class WholeGraphTrainer(object):
         else:
             raise NotImplementedError
         return node_idx_2flip, flipped_label
+
+
+    def single_edit(self, model, idx, label, optimizer, max_num_step):
+        for step in range(1, max_num_step + 1):
+            optimizer.zero_grad()
+            input = self.grab_input(self.whole_data)
+            input['x'] = input['x'][idx]
+            out = model(**input)
+            loss = self.loss_op(out, label)
+            loss.backward()
+            optimizer.step()
+            y_pred = out.argmax(dim=-1)
+            # sequential or independent setting
+            if label.shape[0] == 1:
+                if y_pred == label:
+                    success = True
+                    break
+                else:
+                    success = False
+            # batch setting
+            else:
+                success = int(y_pred.eq(label).sum()) / label.size(0)
+                if success == 1.:
+                    break
+        return model, success, loss, step
+
+
+    def sequential_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+        self.model.train()
+        model = deepcopy(self.model)
+        optimizer = self.get_optimizer(self.model_config, model)
+        results_temporary = []
+        for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
+            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
+            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
+        return results_temporary
+
+
+    def independent_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+        self.model.train()
+        results_temporary = []
+        for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
+            model = deepcopy(self.model)
+            optimizer = self.get_optimizer(self.model_config, model)
+            edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
+            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
+        return results_temporary
+
+
+    def batch_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+        self.model.train()
+        model = deepcopy(self.model)
+        optimizer = self.get_optimizer(self.model_config, model)
+        edited_model, success, loss, steps = self.single_edit(model, node_idx_2flip.squeeze(), 
+                                                              flipped_label.squeeze(), optimizer, max_num_step)
+        return *self.test(edited_model, whole_data), success, steps
+
+
+    def eval_edit_quality(self, node_idx_2flip, flipped_label, whole_data, max_num_step, bef_edit_results, eval_setting): 
+        bef_edit_tra_acc, bef_edit_val_acc, bef_edit_tst_acc = bef_edit_results
+        assert eval_setting in ['sequential', 'independent', 'batch']
+        if eval_setting == 'sequential':
+            results_temporary = self.sequential_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
+            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
+            tra_drawdown = train_acc[-1] - bef_edit_tra_acc
+            val_drawdown = val_acc[-1] - bef_edit_val_acc
+            test_drawdown = test_acc[-1] - bef_edit_tst_acc
+            success_rate = succeses[-1]
+        elif eval_setting == 'independent' :
+            results_temporary = self.independent_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
+            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
+            tra_drawdown = np.mean(train_acc) - bef_edit_tra_acc
+            val_drawdown = np.mean(val_acc) - bef_edit_val_acc
+            test_drawdown = np.mean(test_acc) - bef_edit_tst_acc
+            success_rate = np.mean(succeses)
+        elif eval_setting == 'batch':
+            train_acc, val_acc, test_acc, succeses, steps = self.batch_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
+            tra_drawdown = train_acc - bef_edit_tra_acc
+            val_drawdown = val_acc - bef_edit_val_acc
+            test_drawdown = test_acc - bef_edit_tst_acc
+            success_rate=succeses,
+            if isinstance(steps, int):
+                steps = [steps]
+        else:
+            raise NotImplementedError
+        return dict(bef_edit_tra_acc=bef_edit_tra_acc, 
+                    bef_edit_val_acc=bef_edit_val_acc, 
+                    bef_edit_tst_acc=bef_edit_tst_acc, 
+                    tra_drawdown=-tra_drawdown * 100, 
+                    val_drawdown=-val_drawdown * 100, 
+                    test_drawdown=-test_drawdown * 100, 
+                    success_rate=success_rate,
+                    mean_complexity=np.mean(steps)
+                    )
+
+
+    def grab_input(self, data: Data, indices=None):
+        return {"x": data.x}
+
+
+class WholeGraphTrainer(BaseTrainer):
+    def __init__(self, 
+                 model: BaseModel, 
+                 train_data: Data, 
+                 whole_data: Data,
+                 model_config: Dict,
+                 output_dir: str,
+                 dataset_name: str,
+                 is_multi_label_task: bool,
+                 amp_mode: bool = False,
+                 runs: int = 10,
+                 seed: int = 0) -> None:
+        super(WholeGraphTrainer, self).__init__(
+            model=model, 
+            train_data=train_data, 
+            whole_data=whole_data,
+            model_config=model_config,
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            is_multi_label_task=is_multi_label_task,
+            amp_mode=amp_mode,
+            runs=runs,
+            seed=seed)
+            
+
+    def grab_input(self, data: Data):
+        return {"x": data.x, 'adj_t': data.adj_t}
+
+
+    def single_edit(self, model, idx, label, optimizer, max_num_step):
+        for step in range(1, max_num_step + 1):
+            optimizer.zero_grad()
+            input = self.grab_input(self.whole_data)
+            out = model(**input)
+            loss = self.loss_op(out[idx], label)
+            loss.backward()
+            optimizer.step()
+            y_pred = out.argmax(dim=-1)[idx]
+            # sequential or independent setting
+            if label.shape[0] == 1:
+                if y_pred == label:
+                    success = True
+                    break
+                else:
+                    success = False
+            # batch setting
+            else:
+                success = int(y_pred.eq(label).sum()) / label.size(0)
+                if success == 1.:
+                    break
+        return model, success, loss, step

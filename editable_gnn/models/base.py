@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn import ModuleList, BatchNorm1d
 from torch_sparse import SparseTensor
+from pathlib import Path
 
 from tqdm import tqdm
 
@@ -11,23 +12,49 @@ class BaseModel(torch.nn.Module):
     def __init__(self, in_channels: int, hidden_channels: int,
                  out_channels: int, num_layers: int, dropout: float = 0.0,
                  batch_norm: bool = False, residual: bool = False, use_linear=False):
+
         super(BaseModel, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.hidden_channels = hidden_channels
         self.dropout = torch.nn.Dropout(p=dropout)
         self.activation = torch.nn.ReLU()
         self.batch_norm = batch_norm
         self.residual = residual
         self.num_layers = num_layers
         self.use_linear = use_linear
+        if self.batch_norm:
+            self.bns = ModuleList()
+            for _ in range(num_layers - 1):
+                bn = BatchNorm1d(hidden_channels)
+                self.bns.append(bn)
+
+
+    @classmethod
+    def from_pretrained(cls, in_channels: int, out_channels: int, saved_ckpt_path: str, **kwargs):
+        model = cls(in_channels=in_channels, out_channels=out_channels, **kwargs)
+        if not saved_ckpt_path.endswith('.pt'):
+            glob_checkpoints = [str(x) for x in Path(saved_ckpt_path).glob(f"{cls.__name__}_*.pt")]
+            assert len(glob_checkpoints) == 1
+            saved_ckpt_path = glob_checkpoints[0]
+        print(f'load model weights from {saved_ckpt_path}')
+        model.load_state_dict(torch.load(saved_ckpt_path, map_location='cpu'))
+        return model
+
+
+    def reset_parameters(self):
+        raise NotImplementedError
+        
+
+class BaseGNNModel(BaseModel):
+    def __init__(self, in_channels: int, hidden_channels: int,
+                 out_channels: int, num_layers: int, dropout: float = 0.0,
+                 batch_norm: bool = False, residual: bool = False, use_linear=False):
+        super(BaseGNNModel, self).__init__(in_channels, hidden_channels, out_channels, num_layers, 
+                                           dropout, batch_norm, residual, use_linear)
         if self.use_linear:
             self.lins = torch.nn.ModuleList()
         self.convs = ModuleList()
-        if self.batch_norm:
-            self.bns = ModuleList()
-            for i in range(num_layers - 1):
-                bn = BatchNorm1d(hidden_channels)
-                self.bns.append(bn)
 
     def reset_parameters(self):
         for conv in self.convs:
@@ -35,14 +62,6 @@ class BaseModel(torch.nn.Module):
         if self.batch_norm:
             for bn in self.bns:
                 bn.reset_parameters()
-
-
-    @classmethod
-    def from_pretrained(cls, in_channels: int, out_channels: int, saved_ckpt_path: str, **kwargs):
-        model = cls(in_channels=in_channels, out_channels=out_channels, **kwargs)
-        print(f'load model weights from {saved_ckpt_path}')
-        model.load_state_dict(torch.load(saved_ckpt_path, map_location='cpu'))
-        return model
 
 
     def forward(self, x: Tensor, adj_t: SparseTensor, *args, **kwargs) -> Tensor:

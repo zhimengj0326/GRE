@@ -6,10 +6,10 @@ import torch.nn.functional as F
 from torch.nn import ModuleList, Linear, BatchNorm1d
 from torch_sparse import SparseTensor
 from torch_geometric.nn import SAGEConv
-from .base import BaseModel
+from .base import BaseGNNModel
 
 
-class SAGE(BaseModel):
+class SAGE(BaseGNNModel):
     def __init__(self, in_channels: int, hidden_channels: int,
                  out_channels: int, num_layers: int, dropout: float = 0.0,
                  batch_norm: bool = False, residual: bool = False, use_linear=False):

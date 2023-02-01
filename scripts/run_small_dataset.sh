@@ -12,11 +12,10 @@ output_dir=./ckpts
 # done
 # done
 
-
-for model in gcn sage; do
-for dataset in arxiv; do
+for dataset in cora flickr reddit2 arxiv; do
+for model in gcn sage mlp; do
     if ! [ -d "./${output_dir}/${dataset}" ]; then
-        mkdir "./${output_dir}/${dataset}"
+        mkdir -p "./${output_dir}/${dataset}"
     fi
     CUDA_VISIBLE_DEVICES=$1 python ./train.py \
         --config ./config/${model}.yaml \
