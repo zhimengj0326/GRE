@@ -190,10 +190,10 @@ def preprocess_data(model_config, data):
         print(f'Done! [{time.perf_counter() - t:.2f}s]')
 
 
-def prepare_dataset(model_config, data):
+def prepare_dataset(model_config, data, remove_edge_index=True):
     train_data = to_inductive(data)
-    train_data = T.ToSparseTensor()(train_data.to('cuda'))
-    data = T.ToSparseTensor()(data.to('cuda'))
+    train_data = T.ToSparseTensor(remove_edge_index=remove_edge_index)(train_data.to('cuda'))
+    data = T.ToSparseTensor(remove_edge_index=remove_edge_index)(data.to('cuda'))
     preprocess_data(model_config, train_data)
     preprocess_data(model_config, data)
     return train_data, data

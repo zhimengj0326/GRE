@@ -9,6 +9,8 @@ import numpy as np
 import re
 import torch.nn.functional as F
 from tqdm import tqdm
+from torch_geometric.utils import k_hop_subgraph
+
 from torch_geometric.data.data import Data
 from editable_gnn.models.base import BaseModel
 from editable_gnn.logger import Logger
@@ -244,18 +246,26 @@ class BaseTrainer(object):
         results_temporary = []
         for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
             edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
-            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
+            res = [*self.test(edited_model, whole_data), success, steps]
+            # for n_hop in [1, 2]:
+            #     res.append(self.get_khop_neighbors_acc(model, n_hop, idx))
+            results_temporary.append(res)
         return results_temporary
 
 
-    def independent_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step):
+    def independent_edit(self, node_idx_2flip, flipped_label, whole_data, max_num_step, num_htop=0):
         self.model.train()
         results_temporary = []
         for idx, f_label in tqdm(zip(node_idx_2flip, flipped_label)):
             model = deepcopy(self.model)
             optimizer = self.get_optimizer(self.model_config, model)
             edited_model, success, loss, steps = self.single_edit(model, idx, f_label, optimizer, max_num_step)
-            results_temporary.append((*self.test(edited_model, whole_data), success, steps))
+            res = [*self.test(edited_model, whole_data), success, steps]
+            hop_res = []
+            for n_hop in range(1, num_htop+1):
+                hop_res.append(self.get_khop_neighbors_acc(model, n_hop, idx))
+            res.append(hop_res)
+            results_temporary.append(res)
         return results_temporary
 
 
@@ -268,41 +278,65 @@ class BaseTrainer(object):
         return *self.test(edited_model, whole_data), success, steps
 
 
+    def get_khop_neighbors_acc(self, model, num_hop, node_idx):
+        neighbors, _, pos, _ = k_hop_subgraph(node_idx, num_hops=num_hop, edge_index=self.whole_data.edge_index)
+        out = self.prediction(model, self.whole_data)
+        mask = torch.ones_like(neighbors, dtype=torch.bool)
+        mask[pos] = False
+        neighbors = neighbors[mask]
+        acc = self.compute_micro_f1(out, self.whole_data.y, neighbors)
+        return acc
+
+
     def eval_edit_quality(self, node_idx_2flip, flipped_label, whole_data, max_num_step, bef_edit_results, eval_setting): 
         bef_edit_tra_acc, bef_edit_val_acc, bef_edit_tst_acc = bef_edit_results
+        bef_edit_hop_acc = {}
+        N_HOP = 3
+        for n_hop in range(1, N_HOP + 1):
+            bef_edit_hop_acc[n_hop] = []
+            for idx in node_idx_2flip:
+                bef_edit_hop_acc[n_hop].append(self.get_khop_neighbors_acc(self.model, 1, idx))
         assert eval_setting in ['sequential', 'independent', 'batch']
         if eval_setting == 'sequential':
             results_temporary = self.sequential_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
             train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
-            tra_drawdown = train_acc[-1] - bef_edit_tra_acc
-            val_drawdown = val_acc[-1] - bef_edit_val_acc
-            test_drawdown = test_acc[-1] - bef_edit_tst_acc
+            tra_drawdown = bef_edit_tra_acc - train_acc[-1]
+            val_drawdown = bef_edit_val_acc - val_acc[-1]
+            test_drawdown = bef_edit_tst_acc - test_acc[-1]
             success_rate = succeses[-1]
+            hop_drawdown = {}
         elif eval_setting == 'independent' :
-            results_temporary = self.independent_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
-            train_acc, val_acc, test_acc, succeses, steps = zip(*results_temporary)
-            tra_drawdown = np.mean(train_acc) - bef_edit_tra_acc
-            val_drawdown = np.mean(val_acc) - bef_edit_val_acc
-            test_drawdown = np.mean(test_acc) - bef_edit_tst_acc
+            results_temporary = self.independent_edit(node_idx_2flip, flipped_label, whole_data, max_num_step, num_htop=N_HOP)
+            train_acc, val_acc, test_acc, succeses, steps, hop_acc = zip(*results_temporary)
+            hop_acc = np.vstack(hop_acc)
+            tra_drawdown = bef_edit_tra_acc - np.mean(train_acc)
+            val_drawdown = bef_edit_val_acc - np.mean(val_acc)
+            test_drawdown = bef_edit_tst_acc - np.mean(test_acc)
             success_rate = np.mean(succeses)
+            hop_drawdown = {}
+            for n_hop in range(1, N_HOP + 1):
+                hop_drawdown[n_hop] = np.mean(bef_edit_hop_acc[n_hop] - hop_acc[:, n_hop-1]) * 100
+            pdb.set_trace()
         elif eval_setting == 'batch':
             train_acc, val_acc, test_acc, succeses, steps = self.batch_edit(node_idx_2flip, flipped_label, whole_data, max_num_step)
-            tra_drawdown = train_acc - bef_edit_tra_acc
-            val_drawdown = val_acc - bef_edit_val_acc
-            test_drawdown = test_acc - bef_edit_tst_acc
+            tra_drawdown = bef_edit_tra_acc - train_acc
+            val_drawdown = bef_edit_val_acc - val_acc
+            test_drawdown = bef_edit_tst_acc - test_acc
             success_rate=succeses,
             if isinstance(steps, int):
                 steps = [steps]
+            hop_drawdown = {}
         else:
             raise NotImplementedError
         return dict(bef_edit_tra_acc=bef_edit_tra_acc, 
                     bef_edit_val_acc=bef_edit_val_acc, 
                     bef_edit_tst_acc=bef_edit_tst_acc, 
-                    tra_drawdown=-tra_drawdown * 100, 
-                    val_drawdown=-val_drawdown * 100, 
-                    test_drawdown=-test_drawdown * 100, 
+                    tra_drawdown=tra_drawdown * 100, 
+                    val_drawdown=val_drawdown * 100, 
+                    test_drawdown=test_drawdown * 100, 
                     success_rate=success_rate,
-                    mean_complexity=np.mean(steps)
+                    mean_complexity=np.mean(steps),
+                    hop_drawdown=hop_drawdown,
                     )
 
 
