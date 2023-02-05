@@ -175,12 +175,12 @@ class BaseTrainer(object):
             optimizer = torch.optim.RMSprop(model.parameters(), lr=model_config['lr'])
         else:
             raise NotImplementedError
-        if model_config['optim'] == 'adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=model_config['lr'])
-        elif model_config['optim'] == 'rmsprop':
-            optimizer = torch.optim.RMSprop(model.parameters(), lr=model_config['lr'])
-        else:
-            raise NotImplementedError
+        # if model_config['optim'] == 'adam':
+        #     optimizer = torch.optim.Adam(model.parameters(), lr=model_config['lr'])
+        # elif model_config['optim'] == 'rmsprop':
+        #     optimizer = torch.optim.RMSprop(model.parameters(), lr=model_config['lr'])
+        # else:
+        #     raise NotImplementedError
         return optimizer
 
 

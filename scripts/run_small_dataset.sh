@@ -12,8 +12,8 @@ output_dir=./ckpts
 # done
 # done
 
-for dataset in cora flickr reddit2 arxiv; do
-for model in gcn sage mlp; do
+for dataset in products; do  ##cora flickr reddit2 arxiv yelp products
+for model in gcn sage mlp; do  ## gcn sage mlp
     if ! [ -d "./${output_dir}/${dataset}" ]; then
         mkdir -p "./${output_dir}/${dataset}"
     fi
@@ -23,3 +23,4 @@ for model in gcn sage mlp; do
         --output_dir ${output_dir} 2>&1 | tee ${output_dir}/${dataset}/${model}.log
 done
 done
+# python ./train.py --config ./config/gcn.yaml --dataset flickr --output_dir ./ckpts

@@ -15,6 +15,18 @@ params:
     lr: 0.01
     epochs: 500
   
+  products:
+    arch_name: GCN
+    architecture:
+      num_layers: 3
+      hidden_channels: 128
+      dropout: 0.5
+      batch_norm: false
+      residual: false
+    optim: adam
+    lr: 0.01
+    epochs: 500
+  
   reddit:
     arch_name: SAGE
     architecture:
